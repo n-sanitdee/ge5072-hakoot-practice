@@ -1,31 +1,30 @@
 // Hakoot Practice — self-paced GE5072 final-exam practice. No server: the name, best scores and the set in
 // progress stay in this browser (localStorage). Questions come from data.js (tools/build.py).
 //
-// Pre-Final Sets = the whole exam in one sitting (Section I: Units 1, 2, 4 + Company Profile; Section II:
-// Describing Trends; Section III: External Reading), 8 different sets. Topic sets = optional extra practice.
+// Each Pre-Final Set follows the final exam (70 items): Section I Units 1, 2, 4 (43) · Section II Company
+// Profile (7) + Describing Trends (10) · Section III External Reading (10). Most Section I/II questions are gaps
+// in a short text; the text is shown above the question with the current gap highlighted.
 (() => {
   'use strict';
 
   const D = window.HP_DATA;
   const app = document.getElementById('app');
-  const KEY = 'hakoot-practice:v1';
+  const KEY = 'hakoot-practice:v2';
+  const OLD_KEY = 'hakoot-practice:v1';
   const PARTS = D.parts;
   const PART = Object.fromEntries(PARTS.map((p) => [p.id, p]));
-  const SETS = D.sets;
   const EXAMS = D.exams;
-  const BY_ID = Object.fromEntries([...SETS, ...EXAMS].map((s) => [s.id, s]));
-  const isExam = (id) => BY_ID[id] && BY_ID[id].kind === 'exam';
-  const sizeOf = (id) => (isExam(id) ? BY_ID[id].refs.length : BY_ID[id].qs.length);
+  const BY_ID = Object.fromEntries(EXAMS.map((s) => [s.id, s]));
 
   // ── storage (per browser; never required) ─────────────────────────────
-  function load() {
+  function load(k) {
     try {
-      return JSON.parse(localStorage.getItem(KEY)) || {};
+      return JSON.parse(localStorage.getItem(k)) || {};
     } catch (e) {
       return {};
     }
   }
-  const store = Object.assign({name: '', best: {}, plays: {}, cur: null}, load());
+  const store = Object.assign({name: load(OLD_KEY).name || '', best: {}, plays: {}, cur: null}, load(KEY));
   function save() {
     try {
       localStorage.setItem(KEY, JSON.stringify(store));
@@ -66,8 +65,31 @@
     }
     return h + '</div>';
   }
-  const titleOf = (id) => (BY_ID[id] ? BY_ID[id].title : id);
   const scroll0 = () => window.scrollTo(0, 0);
+
+  // The text of a gap question: current gap highlighted, gaps already answered in this game filled in.
+  function passage(g, i) {
+    const q = g.qs[i];
+    const done = {};
+    g.qs.forEach((x, j) => {
+      if (x.pid === q.pid && (g.res[j] === true || g.res[j] === false)) done[x.g] = x.opts.find((o) => o.right).t;
+    });
+    const html = esc(q.ctx).replace(/\{(\d+)\}/g, (_, n) => {
+      n = Number(n);
+      if (n === q.g) return `<mark class="gap cur">(${n}) ______</mark>`;
+      if (done[n] !== undefined) return `<span class="gap filled">${esc(done[n])}</span>`;
+      return `<span class="gap">(${n}) ____</span>`;
+    }).replace(/\n/g, '<br>');
+    return `<section class="ctx" aria-label="Text"><h4>${esc(q.ct)}</h4><div class="ctx-body">${html}</div></section>`;
+  }
+  // For the mistakes list: the sentence with the gap, the right answer filled in.
+  function gapSentence(q) {
+    const line = q.ctx.split('\n').find((l) => l.includes(`{${q.g}}`)) || '';
+    const parts = line.split(/(?<=[.!?])\s+/);
+    const s = parts.find((p) => p.includes(`{${q.g}}`)) || line;
+    const right = q.opts.find((o) => o.right).t;
+    return esc(s).replace(`{${q.g}}`, `<b class="fill">${esc(right)}</b>`).replace(/\{(\d+)\}/g, '…');
+  }
 
   // ── game state ────────────────────────────────────────────────────────
   let game = null; // the set being played; also saved as store.cur so it survives closing the page
@@ -75,24 +97,11 @@
   function makeQs(list) {
     return list.map((x) => {
       const order = shuffle([0, 1, 2, 3]);
-      return {q: x.q, opts: order.map((k) => ({t: x.a[k], right: k === 0})), ex: x.ex, p: x.p, tag: x.tag};
+      return Object.assign({}, x, {opts: order.map((k) => ({t: x.a[k], right: k === 0})), a: undefined});
     });
   }
-  function questionsOf(id) {
-    const s = BY_ID[id];
-    if (s.kind === 'exam') {
-      return s.refs.map(([si, qi]) => {
-        const src = SETS[si];
-        return Object.assign({p: src.part, tag: PART[src.part].sec}, src.qs[qi]);
-      });
-    }
-    return s.qs.map((q) => Object.assign({p: s.part}, q));
-  }
-  function start(id, again) {
-    const list = questionsOf(id);
-    // a Pre-Final Set keeps the exam's order; a topic set is reshuffled when played again
-    const qs = makeQs(again && !isExam(id) ? shuffle(list) : list);
-    game = {id, title: titleOf(id), qs, i: 0, res: [], pick: [], streak: 0, answered: false};
+  function start(id) {
+    game = {id, v: D.version, title: BY_ID[id].title, qs: makeQs(BY_ID[id].qs), i: 0, res: [], pick: [], streak: 0, answered: false};
     persist();
     try {
       history.pushState({hp: 'play'}, '');
@@ -120,7 +129,7 @@
           <button class="btn gold" type="submit">Enter <span class="th" lang="th">เข้าเล่น</span> ▸</button>
         </form>
         <ul class="how">
-          <li>📝 <span><b>${EXAMS.length} Pre-Final Sets.</b> Each covers every topic, like the final exam. <span class="th" lang="th">ทุกชุดมีครบทุกหัวข้อเหมือนข้อสอบจริง แต่ละชุดข้อไม่ซ้ำกัน</span></span></li>
+          <li>📝 <span><b>${EXAMS.length} Pre-Final Sets, 70 questions each</b>, laid out like the final exam. <span class="th" lang="th">ทุกชุดครบทุกส่วนเหมือนข้อสอบจริง ข้อไม่ซ้ำกันข้ามชุด</span></span></li>
           <li>⏱️ <span><b>No time limit, no competitors.</b> <span class="th" lang="th">ไม่จับเวลา ไม่มีคู่แข่ง</span></span></li>
           <li>✅ <span><b>The answer and a Thai explanation</b> right after every question. <span class="th" lang="th">เฉลยพร้อมคำอธิบายภาษาไทยทันทีทุกข้อ</span></span></li>
         </ul>
@@ -148,12 +157,9 @@
     const full = b.s === b.n;
     return `<span class="badge ${full ? 'full' : 'done'}">${full ? '★ ' : '✓ '}${b.s}/${b.n}</span>`;
   }
-  function row(id, part, title, sub) {
-    return `<button class="row" data-play="${esc(id)}"><span class="stripe p-${part}"></span>
-      <span class="rt"><b>${esc(title)}</b><small>${sub}</small></span>${badge(id)}</button>`;
-  }
-  function examRow(s) {
-    return row(s.id, 'pf', s.title, `${s.refs.length} questions · Sections I–III`);
+  function row(s) {
+    return `<button class="row" data-play="${esc(s.id)}"><span class="stripe p-pf"></span>
+      <span class="rt"><b>${esc(s.title)}</b><small>${s.qs.length} questions · Sections I–III</small></span>${badge(s.id)}</button>`;
   }
 
   function renderHome() {
@@ -161,7 +167,7 @@
     const done = EXAMS.filter((s) => store.best[s.id]).length;
     const pct = Math.round((done / EXAMS.length) * 100);
     const cur = game && !game.finished ? game : null;
-    let h = `
+    app.innerHTML = `
       <header class="top">
         <div class="brand">${logo(16)} <span>Hakoot</span> Practice</div>
         <button class="who" data-act="name" title="Change name">👤 ${esc(store.name)}</button>
@@ -169,39 +175,21 @@
       <section class="hello">
         <h2>Hi, ${esc(store.name)}! 👋</h2>
         <p>Pick a Pre-Final Set. <span class="th" lang="th">เลือกชุดฝึกก่อนสอบได้เลย</span></p>
-        <div class="overall"><span>${done} / ${EXAMS.length} Pre-Final Sets done</span><span class="meter"><b style="width:${pct}%"></b></span></div>
+        <div class="overall"><span>${done} / ${EXAMS.length} sets done</span><span class="meter"><b style="width:${pct}%"></b></span></div>
         ${cur ? `<div class="resume"><p>Unfinished: <b>${esc(cur.title)}</b> · question ${cur.i + 1} of ${cur.qs.length} <span class="th" lang="th">ทำต่อจากเดิมได้</span></p>
           <button class="btn gold" data-act="resume">Continue ▸</button></div>` : ''}
       </section>
       <section class="group" id="g-pf">
         <h3>Pre-Final Sets <small class="th" lang="th">ชุดฝึกก่อนสอบปลายภาค</small></h3>
-        <p class="note">Each set follows the final exam: <b>Section I</b> Units 1, 2, 4 + Company Profile · <b>Section II</b> Describing Trends · <b>Section III</b> External Reading.
-          <span class="th" lang="th">ทุกชุดครบทุกหัวข้อ เรียงแบบข้อสอบปลายภาค และข้อไม่ซ้ำกันข้ามชุด</span></p>
-        <div class="rows">${EXAMS.map(examRow).join('')}</div>
+        <table class="layout" aria-label="What is in every set">
+          <tr><th>Section I</th><td>Grammar, Vocabulary &amp; Expressions — Unit 1 · Unit 2 · Unit 4</td><td>43</td></tr>
+          <tr><th>Section II</th><td>Company Profile &amp; Describing Trends</td><td>17</td></tr>
+          <tr><th>Section III</th><td>External Reading <i>(5 Marketing Trends Brands Can't Ignore in 2026)</i></td><td>10</td></tr>
+        </table>
+        <p class="note"><span class="th" lang="th">ทุกชุดมี 70 ข้อ เรียงแบบข้อสอบปลายภาค ข้อไม่ซ้ำกันข้ามชุด · ส่วน External Reading เปิดบทความไว้ดูประกอบได้</span></p>
+        <div class="rows">${EXAMS.map(row).join('')}</div>
       </section>
-      <details class="more">
-        <summary>Practice by topic <span class="th" lang="th">ฝึกแยกหัวข้อ (ไม่บังคับ)</span></summary>
-        <nav class="chips" aria-label="Topics">
-          ${PARTS.map((p) => `<a class="chip" href="#g-${p.id}"><i class="p-${p.id}"></i>${esc(p.en.split(' · ')[0])}</a>`).join('')}
-        </nav>`;
-    for (const p of PARTS) {
-      const topic = SETS.filter((s) => s.part === p.id && s.kind === 'topic');
-      const vocab = SETS.filter((s) => s.part === p.id && s.kind === 'vocab');
-      h += `<section class="group" id="g-${p.id}">
-        <h3>${esc(p.en)} <small class="th" lang="th">${esc(p.th)}</small></h3>
-        ${topic.length ? `<div class="kind">${p.id === 'er' ? 'Reading' : 'Grammar · functions · usage'}</div>
-        <div class="rows">${topic.map((s) => row(s.id, p.id, s.title, `${s.qs.length} questions · ${esc(s.sub)}`)).join('')}</div>` : ''}
-        ${vocab.length ? `<div class="kind">Vocabulary · every word on the list</div>
-        <div class="rows">${vocab.map((s) => row(s.id, p.id, s.title, esc(s.sub))).join('')}</div>` : ''}
-      </section>`;
-    }
-    h += `</details>
       <p class="foot">Your name and scores stay on this phone only. <span class="th" lang="th">ชื่อและคะแนนเก็บไว้ในเครื่องนี้เท่านั้น ไม่มีการเก็บคะแนน</span><br>GE5072 · 1/2569</p>`;
-    app.innerHTML = h;
-    // open "Practice by topic" when a topic chip / anchor is used
-    app.querySelectorAll('.chip').forEach((a) => a.addEventListener('click', () => {
-      app.querySelector('details.more').open = true;
-    }));
   }
 
   function renderQuestion() {
@@ -217,8 +205,9 @@
         <div class="tally" aria-label="${right} right, ${wrong} wrong"><span class="g">✓ ${right}</span><span class="r">✗ ${wrong}</span></div>
       </header>
       ${beads(n, g.res, g.i)}
+      <span class="sectag p-${q.p}">${esc(PART[q.p].sec)}</span>
+      ${q.ctx ? passage(g, g.i) : ''}
       <section class="qcard">
-        ${q.tag ? `<span class="tag">${esc(q.tag)}</span>` : ''}
         <p class="qtext">${fmt(q.q)}</p>
       </section>
       <div class="tiles" role="group" aria-label="Answers">
@@ -227,6 +216,12 @@
       <div id="fb"></div>`;
     g.answered = false;
     scroll0();
+    // long texts: scroll the text box so the current gap sits near the top third
+    const box = app.querySelector('.ctx');
+    const m = box && box.querySelector('mark.gap.cur');
+    if (m && box.scrollHeight > box.clientHeight) {
+      box.scrollTop = Math.max(0, m.offsetTop - box.clientHeight / 3); // .ctx is position:relative, so offsetTop is inside the box
+    }
   }
 
   function answer(k, replay) {
@@ -253,6 +248,11 @@
         b.insertAdjacentHTML('beforeend', '<span class="mark" aria-hidden="true">✗</span>');
       }
     });
+    const cur = app.querySelector('.ctx .gap.cur');
+    if (cur) {
+      cur.textContent = q.opts.find((o) => o.right).t;
+      cur.classList.add(ok ? 'ok' : 'no');
+    }
     const bead = app.querySelectorAll('.beads i')[g.i];
     bead.classList.remove('cur');
     bead.classList.add(ok ? 'ok' : 'bad');
@@ -314,7 +314,6 @@
     return ['📚', 'Keep practising!', 'ค่อย ๆ ทวนทีละข้อ แล้วลองชุดถัดไปอีกรอบ'];
   }
 
-  // score per part (Section I units, Company Profile, Section II, Section III)
   function breakdown(g) {
     const t = {};
     g.qs.forEach((q, i) => {
@@ -325,31 +324,14 @@
     return PARTS.filter((p) => t[p.id]).map((p) => Object.assign({p}, t[p.id]));
   }
 
-  // The next set to try: the next unplayed Pre-Final Set (then the lowest-scoring one);
-  // plus, after a Pre-Final Set, topic sets for the two weakest parts.
+  // The other sets in suggested order: the next unplayed one first, then the lowest best score.
   function suggestions(g) {
-    const out = [];
-    const add = (id) => {
-      if (id && id !== g.id && !out.includes(id)) out.push(id);
-    };
     const k = EXAMS.findIndex((e) => e.id === g.id);
-    const ring = EXAMS.slice(k + 1).concat(EXAMS.slice(0, Math.max(k, 0)));
-    add((ring.find((e) => !store.best[e.id]) || ring.slice().sort((a, b) =>
-      store.best[a.id].s / store.best[a.id].n - store.best[b.id].s / store.best[b.id].n)[0] || {}).id);
-    const weak = breakdown(g).filter((b) => b.s < b.n).sort((a, b) => a.s / a.n - b.s / b.n).slice(0, 2);
-    for (const b of weak) {
-      const pool = SETS.filter((s) => s.part === b.p.id && s.kind === 'topic');
-      add((pool.find((s) => !store.best[s.id]) || pool[0] || {}).id);
-    }
-    return out;
-  }
-  function partOf(id) {
-    return isExam(id) ? 'pf' : BY_ID[id].part;
-  }
-  function subOf(id) {
-    const s = BY_ID[id];
-    if (s.kind === 'exam') return `${s.refs.length} questions · Sections I–III`;
-    return `${PART[s.part].en} · ${s.qs.length} questions`;
+    const ring = EXAMS.slice(k + 1).concat(EXAMS.slice(0, k));
+    const unplayed = ring.filter((e) => !store.best[e.id]);
+    const played = ring.filter((e) => store.best[e.id]).sort((a, b) =>
+      store.best[a.id].s / store.best[a.id].n - store.best[b.id].s / store.best[b.id].n);
+    return [...unplayed, ...played];
   }
 
   function renderEnd(g, s, n, prev, isBest) {
@@ -358,7 +340,8 @@
     const [emoji, en, th] = message(p);
     const sug = suggestions(g);
     const misses = g.qs.map((q, i) => ({q, i})).filter((x) => g.res[x.i] === false);
-    const bd = isExam(g.id) ? breakdown(g) : [];
+    const bd = breakdown(g);
+    const weakest = bd.slice().sort((a, b) => a.s / a.n - b.s / b.n)[0];
     let best = '';
     if (prev && isBest) best = `<p class="bestline new">⭐ New best! (before: ${prev.s}/${prev.n})</p>`;
     else if (prev) best = `<p class="bestline">Your best: ${prev.s}/${prev.n}</p>`;
@@ -372,24 +355,23 @@
         <p class="pct">${Math.round(p * 100)}% correct <span class="th" lang="th">${esc(th)}</span></p>
         ${beads(n, g.res, -1)}
         ${best}
-        ${bd.length ? `<table class="secs"><caption>Score by section <span class="th" lang="th">คะแนนแยกตามส่วน</span></caption>
+        <table class="secs"><caption>Score by section <span class="th" lang="th">คะแนนแยกตามส่วน</span></caption>
           ${bd.map((b) => `<tr><th scope="row"><i class="p-${b.p.id}"></i>${esc(b.p.sec)}</th><td>${b.s}/${b.n}</td>
             <td class="bar"><span><b style="width:${Math.round((b.s / b.n) * 100)}%"></b></span></td></tr>`).join('')}
-          </table>` : ''}
+        </table>
+        ${weakest && weakest.s < weakest.n ? `<p class="weak">Focus next: <b>${esc(weakest.p.sec)}</b> <span class="th" lang="th">ส่วนที่ควรทวนเพิ่ม — อ่านคำอธิบายข้อที่ผิดด้านล่าง</span></p>` : ''}
         <div class="actions">
-          ${first ? `<button class="btn gold next-set" data-play="${esc(first)}"><span>Try another set <span class="th" lang="th">ลองชุดถัดไป</span> ▸</span><small>${esc(titleOf(first))}</small></button>` : ''}
+          ${first ? `<button class="btn gold next-set" data-play="${esc(first.id)}"><span>Try another set <span class="th" lang="th">ลองชุดถัดไป</span> ▸</span><small>${esc(first.title)}</small></button>` : ''}
           <div class="split">
             <button class="btn ghost" data-act="again">↻ Play again</button>
             <button class="btn ghost" data-act="home">All sets</button>
           </div>
         </div>
-        ${sug.length > 1 ? `<section class="box"><h3>Practise your weak spots <small class="th" lang="th">ฝึกเพิ่มเฉพาะส่วนที่ยังพลาด</small></h3>
-          <div class="rows">${sug.slice(1).map((id) => row(id, partOf(id), titleOf(id), esc(subOf(id)))).join('')}</div></section>` : ''}
         <section class="box">
           <h3>${misses.length ? `Check your mistakes <small class="th" lang="th">ทบทวนข้อที่ตอบผิด (${misses.length})</small>` : 'Mistakes'}</h3>
           ${misses.length ? `<ul class="mist">${misses.map(({q, i}) => `<li>
-              ${q.tag ? `<span class="mtag">${esc(q.tag)}</span>` : ''}
-              <span class="mq">${i + 1}. ${fmt(q.q)}</span>
+              <span class="mtag">${i + 1} · ${esc(PART[q.p].sec)}${q.ct ? ` · ${esc(q.ct)}` : ''}</span>
+              <span class="mq">${q.ctx ? gapSentence(q) : fmt(q.q)}</span>
               <span class="mine">✗ ${esc(q.opts[g.pick[i]].t)}</span>
               <span class="ok">✓ ${esc(q.opts.find((o) => o.right).t)}</span>
               <p class="fb-ex" lang="th">${fmt(q.ex)}</p></li>`).join('')}</ul>`
@@ -413,13 +395,13 @@
     if (t.dataset.play) {
       if (game && !game.finished && game.id !== t.dataset.play && game.res.length &&
           !window.confirm(`Start a new set? Your unfinished "${game.title}" will be lost.\nเริ่มชุดใหม่ไหม ชุดที่ทำค้างไว้จะหายไป`)) return;
-      return start(t.dataset.play, false);
+      return start(t.dataset.play);
     }
     switch (t.dataset.act) {
       case 'next': return next();
       case 'quit': return renderHome();
       case 'resume': return resume();
-      case 'again': return start(game.id, true);
+      case 'again': return start(game.id);
       case 'home': game = null; persist(); return renderHome();
       case 'name': return renderWelcome();
     }
@@ -437,13 +419,12 @@
       next();
     }
   });
-  // Phone "Back" during a set goes to the list; the set waits there under "Continue".
   window.addEventListener('popstate', () => {
     if (game && !game.finished && app.querySelector('.tiles')) renderHome();
   });
 
-  // a set left unfinished last time (only if it still exists in this version of the questions)
-  if (store.cur && BY_ID[store.cur.id] && store.cur.qs && store.cur.qs.length === sizeOf(store.cur.id)) game = store.cur;
+  // a set left unfinished last time — only if the questions have not changed since
+  if (store.cur && store.cur.v === D.version && BY_ID[store.cur.id]) game = store.cur;
   else store.cur = null;
   if (store.name) renderHome();
   else renderWelcome();
