@@ -6,8 +6,12 @@ Self-paced practice in the Hakoot look (same colours and answer shapes as
 - Students type a nickname and play. No host, no PIN, no timer, no leaderboard.
 - After every answer: the right answer and a Thai explanation.
 - One-line progress bar of small connected circles: green = right, red = wrong.
-- At the end: score, the mistakes with explanations, and the next sets to try.
-- 35 fixed sets + 2 mixed sets (25 / 50 questions drawn from every topic, new each time).
+- **8 Pre-Final Sets** (the main thing): each is the whole exam in one sitting, in the exam's order and
+  proportions — Section I: Unit 1 (14) · Unit 2 (14) · Unit 4 (15) · Company Profile (7); Section II:
+  Describing Trends (10); Section III: External Reading (10) = 70. No question appears in two sets.
+- At the end: score, score by section, the mistakes with explanations, the next Pre-Final Set, and topic
+  sets for the weakest sections. An unfinished set is saved and can be continued later.
+- Optional "Practice by topic": 39 sets (hand-written grammar/usage sets + one vocabulary set per lesson list).
 - Nothing is sent anywhere: the name and best scores stay in the student's browser (localStorage).
 
 ## Files
@@ -18,7 +22,7 @@ Self-paced practice in the Hakoot look (same colours and answer shapes as
 | `data.js` | GENERATED question bank — do not edit by hand |
 | `tools/content.py` | hand-written sets: Units 1/2/4, Company Profile, Describing Trends, External Reading |
 | `tools/vocab.csv` | the course word list (copy of Vocab-Quiz-App `vocab/GE5072_vocab.csv`) |
-| `tools/build.py` | builds `data.js` (adds one vocabulary set per lesson word list + the 53 reading words) and stamps `?v=` cache keys into `index.html` |
+| `tools/build.py` | builds `data.js`: one vocabulary set per lesson word list + the 53 reading words, then deals the 8 Pre-Final Sets (`N_PREFINAL`, `QUOTA`); stamps `?v=` cache keys into `index.html` |
 
 ## Edit questions
 

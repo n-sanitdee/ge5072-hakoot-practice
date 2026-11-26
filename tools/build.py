@@ -226,6 +226,60 @@ def stamp():
     open(idx, 'w', encoding='utf-8').write(html)
 
 
+# Pre-Final Sets: each one = the whole exam in one sitting, in the exam's order and proportions
+# (coordinator's Work Distribution 1/2026: Section I = Unit 1 14 · Unit 2 14 · Unit 4 15 · Company Profile 7,
+# Section II = Describing Trends 10, Section III = External Reading 10 → 70). No question is in two sets.
+N_PREFINAL = 8
+QUOTA = [('u1', 14), ('u2', 14), ('u4', 15), ('cp', 7), ('dt', 10), ('er', 10)]
+SECTION = {'u1': 'Section I · Unit 1', 'u2': 'Section I · Unit 2', 'u4': 'Section I · Unit 4',
+           'cp': 'Section I · Company Profile', 'dt': 'Section II · Describing Trends',
+           'er': 'Section III · External Reading'}
+
+
+def interleave(groups, rng):
+    """Round-robin over the source sets (each shuffled), so consecutive items come from different lessons."""
+    pools = [rng.sample(g, len(g)) for g in groups if g]
+    out = []
+    while any(pools):
+        for g in pools:
+            if g:
+                out.append(g.pop())
+    return out
+
+
+def build_prefinal(all_sets):
+    rng = random.Random(20261202)
+    exams = [[] for _ in range(N_PREFINAL)]
+    for part, q in QUOTA:
+        def refs(kind):
+            return [[(si, qi) for qi in range(len(s['items']))]
+                    for si, s in enumerate(all_sets) if s['part'] == part and s['kind'] == kind]
+        topic = interleave(refs('topic'), rng)
+        vocab = interleave(refs('vocab'), rng)
+        need = q * N_PREFINAL
+        assert len(topic) + len(vocab) >= need, (part, len(topic), len(vocab), need)
+        topic = topic[:need]
+        # hand-written items first: contiguous slices of the interleaved list, so every set mixes lessons
+        base, extra = divmod(len(topic), N_PREFINAL)
+        chunk, i = [], 0
+        for k in range(N_PREFINAL):
+            n = min(q, base + (1 if k < extra else 0))
+            chunk.append(topic[i:i + n])
+            i += n
+        vi = 0
+        for k in sorted(range(N_PREFINAL), key=lambda k: len(chunk[k])):
+            while len(chunk[k]) < q:             # then fill each set with vocabulary items
+                chunk[k].append(vocab[vi])
+                vi += 1
+        for k in range(N_PREFINAL):
+            exams[k] += rng.sample(chunk[k], q)  # mixed order inside the part
+    used = [r for e in exams for r in e]
+    assert len(used) == len(set(used)) == 70 * N_PREFINAL
+    return [{'id': f'pf-{k + 1}', 'part': 'pf', 'kind': 'exam', 'title': f'Pre-Final Set {k + 1}',
+             'sub': '70 questions · Sections I–III · every topic',
+             'refs': [[si, qi] for si, qi in e]} for k, e in enumerate(exams)]
+
+
 def main():
     topic = [dict(s, kind='topic') for s in content.SETS]
     vocab, had_article = build_vocab_sets()
@@ -237,10 +291,13 @@ def main():
     assert len(ids) == len(set(ids)), 'duplicate set id'
     for s in all_sets:
         check(s['items'], s['id'])
+    prefinal = build_prefinal(all_sets)
     data = {
-        'parts': [{'id': p, 'en': en, 'th': th} for p, en, th in content.PARTS],
+        'parts': [{'id': p, 'en': en, 'th': th, 'sec': SECTION[p]} for p, en, th in content.PARTS],
         'sets': [{'id': s['id'], 'part': s['part'], 'kind': s['kind'], 'title': s['title'], 'sub': s['sub'],
                   'qs': [{'q': q, 'a': a, 'ex': ex} for q, a, ex in s['items']]} for s in all_sets],
+        # a Pre-Final question = [index into sets, index into that set's qs]
+        'exams': prefinal,
     }
     out = os.path.join(ROOT, 'data.js')
     with open(out, 'w', encoding='utf-8') as f:
@@ -251,7 +308,7 @@ def main():
         f.write(';\n')
     stamp()
     nq = sum(len(s['qs']) for s in data['sets'])
-    print(f'{len(data["sets"])} sets, {nq} questions → {out}')
+    print(f'{len(prefinal)} Pre-Final Sets × 70 + {len(data["sets"])} topic/vocab sets, {nq} questions → {out}')
     for p in order:
         ss = [s for s in data['sets'] if s['part'] == p]
         print(f'  {p}: {len(ss)} sets, {sum(len(s["qs"]) for s in ss)} Qs')

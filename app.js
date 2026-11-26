@@ -1,5 +1,8 @@
-// Hakoot Practice — self-paced GE5072 final-exam practice. No server: the name, best scores and
-// play counts stay in this browser (localStorage). Questions come from data.js (tools/build.py).
+// Hakoot Practice — self-paced GE5072 final-exam practice. No server: the name, best scores and the set in
+// progress stay in this browser (localStorage). Questions come from data.js (tools/build.py).
+//
+// Pre-Final Sets = the whole exam in one sitting (Section I: Units 1, 2, 4 + Company Profile; Section II:
+// Describing Trends; Section III: External Reading), 8 different sets. Topic sets = optional extra practice.
 (() => {
   'use strict';
 
@@ -9,16 +12,10 @@
   const PARTS = D.parts;
   const PART = Object.fromEntries(PARTS.map((p) => [p.id, p]));
   const SETS = D.sets;
-  const BY_ID = Object.fromEntries(SETS.map((s) => [s.id, s]));
-
-  // Mixed sets draw new questions from every topic each time they are played.
-  const MIXES = [
-    {id: 'mix-25', title: 'Mixed Practice', th: 'สุ่มข้อจากทุกหัวข้อ', n: 25,
-      plan: {u1: 5, u2: 5, u4: 5, cp: 3, dt: 4, er: 3}},
-    {id: 'mix-50', title: 'Big Mix', th: 'ชุดใหญ่ สุ่มจากทุกหัวข้อ', n: 50,
-      plan: {u1: 10, u2: 10, u4: 11, cp: 5, dt: 7, er: 7}},
-  ];
-  const MIX_BY_ID = Object.fromEntries(MIXES.map((m) => [m.id, m]));
+  const EXAMS = D.exams;
+  const BY_ID = Object.fromEntries([...SETS, ...EXAMS].map((s) => [s.id, s]));
+  const isExam = (id) => BY_ID[id] && BY_ID[id].kind === 'exam';
+  const sizeOf = (id) => (isExam(id) ? BY_ID[id].refs.length : BY_ID[id].qs.length);
 
   // ── storage (per browser; never required) ─────────────────────────────
   function load() {
@@ -28,7 +25,7 @@
       return {};
     }
   }
-  const store = Object.assign({name: '', best: {}, plays: {}}, load());
+  const store = Object.assign({name: '', best: {}, plays: {}, cur: null}, load());
   function save() {
     try {
       localStorage.setItem(KEY, JSON.stringify(store));
@@ -62,49 +59,41 @@
   }
   function beads(n, res, cur) {
     const cls = n > 45 ? 'beads xdense' : n > 28 ? 'beads dense' : 'beads';
-    let h = `<div class="${cls}" role="img" aria-label="${res.filter((r) => r !== undefined).length} of ${n} answered">`;
+    let h = `<div class="${cls}" role="img" aria-label="${res.filter((r) => r === true || r === false).length} of ${n} answered">`;
     for (let i = 0; i < n; i++) {
       const c = res[i] === true ? 'ok' : res[i] === false ? 'bad' : i === cur ? 'cur' : '';
       h += `<i class="${c}"></i>`;
     }
     return h + '</div>';
   }
-  const titleOf = (id) => (BY_ID[id] ? BY_ID[id].title : MIX_BY_ID[id] ? MIX_BY_ID[id].title : id);
-  const sizeOf = (id) => (BY_ID[id] ? BY_ID[id].qs.length : MIX_BY_ID[id].n);
-  function scroll0() {
-    window.scrollTo(0, 0);
-  }
+  const titleOf = (id) => (BY_ID[id] ? BY_ID[id].title : id);
+  const scroll0 = () => window.scrollTo(0, 0);
 
   // ── game state ────────────────────────────────────────────────────────
-  let game = null; // the set being played (kept while the player looks at the list = "paused")
+  let game = null; // the set being played; also saved as store.cur so it survives closing the page
 
   function makeQs(list) {
     return list.map((x) => {
       const order = shuffle([0, 1, 2, 3]);
-      return {q: x.q, opts: order.map((k) => ({t: x.a[k], right: k === 0})), ex: x.ex, tag: x.tag, part: x.part};
+      return {q: x.q, opts: order.map((k) => ({t: x.a[k], right: k === 0})), ex: x.ex, p: x.p, tag: x.tag};
     });
   }
-  function mixQuestions(mix) {
-    const out = [];
-    for (const p of PARTS) {
-      const pool = [];
-      for (const s of SETS) if (s.part === p.id) for (const q of s.qs) pool.push(Object.assign({tag: s.title, part: s.part}, q));
-      out.push(...shuffle(pool).slice(0, mix.plan[p.id] || 0));
+  function questionsOf(id) {
+    const s = BY_ID[id];
+    if (s.kind === 'exam') {
+      return s.refs.map(([si, qi]) => {
+        const src = SETS[si];
+        return Object.assign({p: src.part, tag: PART[src.part].sec}, src.qs[qi]);
+      });
     }
-    return shuffle(out);
+    return s.qs.map((q) => Object.assign({p: s.part}, q));
   }
   function start(id, again) {
-    let qs;
-    let part = null;
-    if (MIX_BY_ID[id]) {
-      qs = makeQs(mixQuestions(MIX_BY_ID[id]));
-    } else {
-      const s = BY_ID[id];
-      part = s.part;
-      const list = s.qs.map((q) => Object.assign({part: s.part}, q));
-      qs = makeQs(again ? shuffle(list) : list);
-    }
-    game = {id, title: titleOf(id), part, qs, i: 0, res: [], pick: [], streak: 0, answered: false};
+    const list = questionsOf(id);
+    // a Pre-Final Set keeps the exam's order; a topic set is reshuffled when played again
+    const qs = makeQs(again && !isExam(id) ? shuffle(list) : list);
+    game = {id, title: titleOf(id), qs, i: 0, res: [], pick: [], streak: 0, answered: false};
+    persist();
     try {
       history.pushState({hp: 'play'}, '');
     } catch (e) {
@@ -112,10 +101,13 @@
     }
     renderQuestion();
   }
+  function persist() {
+    store.cur = game && !game.finished ? game : null;
+    save();
+  }
 
   // ── screens ───────────────────────────────────────────────────────────
   function renderWelcome() {
-    game = null;
     app.innerHTML = `
       <section class="welcome">
         ${logo(30)}
@@ -128,9 +120,9 @@
           <button class="btn gold" type="submit">Enter <span class="th" lang="th">เข้าเล่น</span> ▸</button>
         </form>
         <ul class="how">
+          <li>📝 <span><b>${EXAMS.length} Pre-Final Sets.</b> Each covers every topic, like the final exam. <span class="th" lang="th">ทุกชุดมีครบทุกหัวข้อเหมือนข้อสอบจริง แต่ละชุดข้อไม่ซ้ำกัน</span></span></li>
           <li>⏱️ <span><b>No time limit, no competitors.</b> <span class="th" lang="th">ไม่จับเวลา ไม่มีคู่แข่ง</span></span></li>
           <li>✅ <span><b>The answer and a Thai explanation</b> right after every question. <span class="th" lang="th">เฉลยพร้อมคำอธิบายภาษาไทยทันทีทุกข้อ</span></span></li>
-          <li>🔁 <span><b>${SETS.length + MIXES.length} sets.</b> Play as many as you like. <span class="th" lang="th">เล่นซ้ำได้ไม่จำกัด</span></span></li>
         </ul>
       </section>`;
     const form = app.querySelector('form');
@@ -160,11 +152,15 @@
     return `<button class="row" data-play="${esc(id)}"><span class="stripe p-${part}"></span>
       <span class="rt"><b>${esc(title)}</b><small>${sub}</small></span>${badge(id)}</button>`;
   }
+  function examRow(s) {
+    return row(s.id, 'pf', s.title, `${s.refs.length} questions · Sections I–III`);
+  }
 
   function renderHome() {
     scroll0();
-    const done = SETS.filter((s) => store.best[s.id]).length;
-    const pct = Math.round((done / SETS.length) * 100);
+    const done = EXAMS.filter((s) => store.best[s.id]).length;
+    const pct = Math.round((done / EXAMS.length) * 100);
+    const cur = game && !game.finished ? game : null;
     let h = `
       <header class="top">
         <div class="brand">${logo(16)} <span>Hakoot</span> Practice</div>
@@ -172,21 +168,22 @@
       </header>
       <section class="hello">
         <h2>Hi, ${esc(store.name)}! 👋</h2>
-        <p>Pick a set to practise. <span class="th" lang="th">เลือกชุดที่อยากฝึกได้เลย</span></p>
-        <div class="overall"><span>${done} / ${SETS.length} sets done</span><span class="meter"><b style="width:${pct}%"></b></span></div>
-        ${game && !game.finished ? `<div class="resume"><p>Paused: <b>${esc(game.title)}</b> · question ${game.i + 1} of ${game.qs.length}</p>
+        <p>Pick a Pre-Final Set. <span class="th" lang="th">เลือกชุดฝึกก่อนสอบได้เลย</span></p>
+        <div class="overall"><span>${done} / ${EXAMS.length} Pre-Final Sets done</span><span class="meter"><b style="width:${pct}%"></b></span></div>
+        ${cur ? `<div class="resume"><p>Unfinished: <b>${esc(cur.title)}</b> · question ${cur.i + 1} of ${cur.qs.length} <span class="th" lang="th">ทำต่อจากเดิมได้</span></p>
           <button class="btn gold" data-act="resume">Continue ▸</button></div>` : ''}
       </section>
-      <nav class="chips" aria-label="Topics">
-        <a class="chip" href="#g-mix"><i class="p-mix"></i>Mixed</a>
-        ${PARTS.map((p) => `<a class="chip" href="#g-${p.id}"><i class="p-${p.id}"></i>${esc(p.en.split(' · ')[0])}</a>`).join('')}
-      </nav>
-      <section class="group" id="g-mix">
-        <h3>Mixed practice <small class="th" lang="th">สุ่มข้อจากทุกหัวข้อ · ได้ข้อใหม่ทุกครั้ง</small></h3>
-        <div class="rows">
-          ${MIXES.map((m) => row(m.id, 'mix', m.title, `${m.n} questions from every topic`)).join('')}
-        </div>
-      </section>`;
+      <section class="group" id="g-pf">
+        <h3>Pre-Final Sets <small class="th" lang="th">ชุดฝึกก่อนสอบปลายภาค</small></h3>
+        <p class="note">Each set follows the final exam: <b>Section I</b> Units 1, 2, 4 + Company Profile · <b>Section II</b> Describing Trends · <b>Section III</b> External Reading.
+          <span class="th" lang="th">ทุกชุดครบทุกหัวข้อ เรียงแบบข้อสอบปลายภาค และข้อไม่ซ้ำกันข้ามชุด</span></p>
+        <div class="rows">${EXAMS.map(examRow).join('')}</div>
+      </section>
+      <details class="more">
+        <summary>Practice by topic <span class="th" lang="th">ฝึกแยกหัวข้อ (ไม่บังคับ)</span></summary>
+        <nav class="chips" aria-label="Topics">
+          ${PARTS.map((p) => `<a class="chip" href="#g-${p.id}"><i class="p-${p.id}"></i>${esc(p.en.split(' · ')[0])}</a>`).join('')}
+        </nav>`;
     for (const p of PARTS) {
       const topic = SETS.filter((s) => s.part === p.id && s.kind === 'topic');
       const vocab = SETS.filter((s) => s.part === p.id && s.kind === 'vocab');
@@ -198,8 +195,13 @@
         <div class="rows">${vocab.map((s) => row(s.id, p.id, s.title, esc(s.sub))).join('')}</div>` : ''}
       </section>`;
     }
-    h += `<p class="foot">Your name and scores stay on this phone only. <span class="th" lang="th">ชื่อและคะแนนเก็บไว้ในเครื่องนี้เท่านั้น</span><br>GE5072 · 1/2569</p>`;
+    h += `</details>
+      <p class="foot">Your name and scores stay on this phone only. <span class="th" lang="th">ชื่อและคะแนนเก็บไว้ในเครื่องนี้เท่านั้น ไม่มีการเก็บคะแนน</span><br>GE5072 · 1/2569</p>`;
     app.innerHTML = h;
+    // open "Practice by topic" when a topic chip / anchor is used
+    app.querySelectorAll('.chip').forEach((a) => a.addEventListener('click', () => {
+      app.querySelector('details.more').open = true;
+    }));
   }
 
   function renderQuestion() {
@@ -210,7 +212,7 @@
     const wrong = g.res.filter((r) => r === false).length;
     app.innerHTML = `
       <header class="qtop">
-        <button class="x" data-act="quit" aria-label="Back to all sets" title="Back to all sets">✕</button>
+        <button class="x" data-act="quit" aria-label="Back to all sets" title="Back to all sets (your place is saved)">✕</button>
         <div class="qmeta"><b>${esc(g.title)}</b><span>Question ${g.i + 1} of ${n}</span></div>
         <div class="tally" aria-label="${right} right, ${wrong} wrong"><span class="g">✓ ${right}</span><span class="r">✗ ${wrong}</span></div>
       </header>
@@ -227,15 +229,18 @@
     scroll0();
   }
 
-  function answer(k) {
+  function answer(k, replay) {
     const g = game;
     if (!g || g.answered) return;
     g.answered = true;
     const q = g.qs[g.i];
     const ok = q.opts[k].right;
-    g.res[g.i] = ok;
-    g.pick[g.i] = k;
-    g.streak = ok ? g.streak + 1 : 0;
+    if (!replay) {
+      g.res[g.i] = ok;
+      g.pick[g.i] = k;
+      g.streak = ok ? g.streak + 1 : 0;
+      persist();
+    }
     const tiles = app.querySelector('.tiles');
     tiles.classList.add('done');
     tiles.querySelectorAll('.tile').forEach((b, j) => {
@@ -248,7 +253,6 @@
         b.insertAdjacentHTML('beforeend', '<span class="mark" aria-hidden="true">✗</span>');
       }
     });
-    // progress + tally
     const bead = app.querySelectorAll('.beads i')[g.i];
     bead.classList.remove('cur');
     bead.classList.add(ok ? 'ok' : 'bad');
@@ -282,6 +286,7 @@
     if (!g || !g.answered) return;
     if (g.i < g.qs.length - 1) {
       g.i++;
+      persist();
       renderQuestion();
     } else {
       finish();
@@ -297,7 +302,7 @@
     const isBest = !prev || s / n > prev.s / prev.n;
     if (isBest) store.best[g.id] = {s, n};
     store.plays[g.id] = (store.plays[g.id] || 0) + 1;
-    save();
+    persist();
     renderEnd(g, s, n, prev, isBest);
   }
 
@@ -305,45 +310,45 @@
     if (p === 1) return ['🏆', 'Perfect score!', 'เต็ม! สุดยอดมาก'];
     if (p >= 0.8) return ['🎉', 'Excellent!', 'เก่งมาก พร้อมสอบแล้ว'];
     if (p >= 0.6) return ['👏', 'Good job!', 'ดีมาก อ่านคำอธิบายข้อที่ผิดอีกนิด'];
-    if (p >= 0.4) return ['💪', 'Nice try!', 'ทวนข้อที่ผิด แล้วลองอีกครั้งนะ'];
-    return ['📚', 'Keep practising!', 'ค่อย ๆ ทวนทีละข้อ แล้วเล่นใหม่อีกรอบ'];
+    if (p >= 0.4) return ['💪', 'Nice try!', 'ทวนข้อที่ผิด แล้วลองชุดถัดไปนะ'];
+    return ['📚', 'Keep practising!', 'ค่อย ๆ ทวนทีละข้อ แล้วลองชุดถัดไปอีกรอบ'];
   }
 
-  // Up to three sets to try next: unplayed first (same topic, then the weakest other topics), then low scores.
+  // score per part (Section I units, Company Profile, Section II, Section III)
+  function breakdown(g) {
+    const t = {};
+    g.qs.forEach((q, i) => {
+      t[q.p] = t[q.p] || {s: 0, n: 0};
+      t[q.p].n++;
+      if (g.res[i] === true) t[q.p].s++;
+    });
+    return PARTS.filter((p) => t[p.id]).map((p) => Object.assign({p}, t[p.id]));
+  }
+
+  // The next set to try: the next unplayed Pre-Final Set (then the lowest-scoring one);
+  // plus, after a Pre-Final Set, topic sets for the two weakest parts.
   function suggestions(g) {
     const out = [];
     const add = (id) => {
-      if (id && id !== g.id && !out.includes(id) && out.length < 3) out.push(id);
+      if (id && id !== g.id && !out.includes(id)) out.push(id);
     };
-    const unplayed = (s) => !store.best[s.id];
-    const missByPart = {};
-    g.qs.forEach((q, i) => {
-      if (g.res[i] === false) missByPart[q.part] = (missByPart[q.part] || 0) + 1;
-    });
-    if (g.part) {
-      const same = SETS.filter((s) => s.part === g.part && unplayed(s) && s.id !== g.id);
-      add(same.find((s) => s.kind === 'topic')?.id || same[0]?.id);
+    const k = EXAMS.findIndex((e) => e.id === g.id);
+    const ring = EXAMS.slice(k + 1).concat(EXAMS.slice(0, Math.max(k, 0)));
+    add((ring.find((e) => !store.best[e.id]) || ring.slice().sort((a, b) =>
+      store.best[a.id].s / store.best[a.id].n - store.best[b.id].s / store.best[b.id].n)[0] || {}).id);
+    const weak = breakdown(g).filter((b) => b.s < b.n).sort((a, b) => a.s / a.n - b.s / b.n).slice(0, 2);
+    for (const b of weak) {
+      const pool = SETS.filter((s) => s.part === b.p.id && s.kind === 'topic');
+      add((pool.find((s) => !store.best[s.id]) || pool[0] || {}).id);
     }
-    const done = (p) => SETS.filter((s) => s.part === p && store.best[s.id]).length / SETS.filter((s) => s.part === p).length;
-    const order = PARTS.map((p) => p.id).filter((p) => p !== g.part)
-      .sort((a, b) => (missByPart[b] || 0) - (missByPart[a] || 0) || done(a) - done(b));
-    for (const p of order) {
-      const s = SETS.find((x) => x.part === p && unplayed(x) && x.kind === 'topic') || SETS.find((x) => x.part === p && unplayed(x));
-      if (s) add(s.id);
-      if (out.length >= 2) break;
-    }
-    if (!MIX_BY_ID[g.id]) add('mix-25');
-    else add(g.id === 'mix-25' ? 'mix-50' : 'mix-25');
-    const low = SETS.filter((s) => store.best[s.id]).sort((a, b) => store.best[a.id].s / store.best[a.id].n - store.best[b.id].s / store.best[b.id].n);
-    for (const s of low) add(s.id);
     return out;
   }
   function partOf(id) {
-    return BY_ID[id] ? BY_ID[id].part : 'mix';
+    return isExam(id) ? 'pf' : BY_ID[id].part;
   }
   function subOf(id) {
     const s = BY_ID[id];
-    if (!s) return `${MIX_BY_ID[id].n} questions from every topic`;
+    if (s.kind === 'exam') return `${s.refs.length} questions · Sections I–III`;
     return `${PART[s.part].en} · ${s.qs.length} questions`;
   }
 
@@ -353,9 +358,11 @@
     const [emoji, en, th] = message(p);
     const sug = suggestions(g);
     const misses = g.qs.map((q, i) => ({q, i})).filter((x) => g.res[x.i] === false);
+    const bd = isExam(g.id) ? breakdown(g) : [];
     let best = '';
     if (prev && isBest) best = `<p class="bestline new">⭐ New best! (before: ${prev.s}/${prev.n})</p>`;
     else if (prev) best = `<p class="bestline">Your best: ${prev.s}/${prev.n}</p>`;
+    const first = sug[0];
     app.innerHTML = `
       <section class="end">
         <div class="trophy" aria-hidden="true">${emoji}</div>
@@ -365,18 +372,23 @@
         <p class="pct">${Math.round(p * 100)}% correct <span class="th" lang="th">${esc(th)}</span></p>
         ${beads(n, g.res, -1)}
         ${best}
+        ${bd.length ? `<table class="secs"><caption>Score by section <span class="th" lang="th">คะแนนแยกตามส่วน</span></caption>
+          ${bd.map((b) => `<tr><th scope="row"><i class="p-${b.p.id}"></i>${esc(b.p.sec)}</th><td>${b.s}/${b.n}</td>
+            <td class="bar"><span><b style="width:${Math.round((b.s / b.n) * 100)}%"></b></span></td></tr>`).join('')}
+          </table>` : ''}
         <div class="actions">
-          ${sug[0] ? `<button class="btn gold next-set" data-play="${esc(sug[0])}"><span>Try another set <span class="th" lang="th">ลองชุดถัดไป</span> ▸</span><small>${esc(titleOf(sug[0]))}</small></button>` : ''}
+          ${first ? `<button class="btn gold next-set" data-play="${esc(first)}"><span>Try another set <span class="th" lang="th">ลองชุดถัดไป</span> ▸</span><small>${esc(titleOf(first))}</small></button>` : ''}
           <div class="split">
             <button class="btn ghost" data-act="again">↻ Play again</button>
             <button class="btn ghost" data-act="home">All sets</button>
           </div>
         </div>
-        ${sug.length > 1 ? `<section class="box"><h3>Or try <small class="th" lang="th">หรือลองชุดนี้</small></h3>
+        ${sug.length > 1 ? `<section class="box"><h3>Practise your weak spots <small class="th" lang="th">ฝึกเพิ่มเฉพาะส่วนที่ยังพลาด</small></h3>
           <div class="rows">${sug.slice(1).map((id) => row(id, partOf(id), titleOf(id), esc(subOf(id)))).join('')}</div></section>` : ''}
         <section class="box">
           <h3>${misses.length ? `Check your mistakes <small class="th" lang="th">ทบทวนข้อที่ตอบผิด (${misses.length})</small>` : 'Mistakes'}</h3>
           ${misses.length ? `<ul class="mist">${misses.map(({q, i}) => `<li>
+              ${q.tag ? `<span class="mtag">${esc(q.tag)}</span>` : ''}
               <span class="mq">${i + 1}. ${fmt(q.q)}</span>
               <span class="mine">✗ ${esc(q.opts[g.pick[i]].t)}</span>
               <span class="ok">✓ ${esc(q.opts.find((o) => o.right).t)}</span>
@@ -386,33 +398,32 @@
       </section>`;
   }
 
+  function resume() {
+    if (!game) return;
+    const answered = game.res[game.i] === true || game.res[game.i] === false;
+    renderQuestion();
+    if (answered) answer(game.pick[game.i], true); // show the same answer + explanation again
+  }
+
   // ── events ────────────────────────────────────────────────────────────
   app.addEventListener('click', (e) => {
     const t = e.target.closest('[data-k],[data-act],[data-play]');
     if (!t) return;
     if (t.dataset.k !== undefined) return answer(Number(t.dataset.k));
-    if (t.dataset.play) return start(t.dataset.play, false);
+    if (t.dataset.play) {
+      if (game && !game.finished && game.id !== t.dataset.play && game.res.length &&
+          !window.confirm(`Start a new set? Your unfinished "${game.title}" will be lost.\nเริ่มชุดใหม่ไหม ชุดที่ทำค้างไว้จะหายไป`)) return;
+      return start(t.dataset.play, false);
+    }
     switch (t.dataset.act) {
       case 'next': return next();
       case 'quit': return renderHome();
-      case 'resume': return renderQuestionResume();
+      case 'resume': return resume();
       case 'again': return start(game.id, true);
-      case 'home': game = null; return renderHome();
+      case 'home': game = null; persist(); return renderHome();
       case 'name': return renderWelcome();
     }
   });
-  function renderQuestionResume() {
-    const answered = game.answered;
-    const k = game.pick[game.i];
-    renderQuestion();
-    if (answered) {
-      // show the same answer + explanation again without counting it twice
-      if (game.res[game.i]) game.streak -= 1;
-      game.answered = false;
-      game.res[game.i] = undefined;
-      answer(k);
-    }
-  }
   document.addEventListener('keydown', (e) => {
     if (!game || game.finished || e.target.closest('input') || e.metaKey || e.ctrlKey || e.altKey) return;
     if (!app.querySelector('.tiles')) return;
@@ -431,6 +442,9 @@
     if (game && !game.finished && app.querySelector('.tiles')) renderHome();
   });
 
+  // a set left unfinished last time (only if it still exists in this version of the questions)
+  if (store.cur && BY_ID[store.cur.id] && store.cur.qs && store.cur.qs.length === sizeOf(store.cur.id)) game = store.cur;
+  else store.cur = null;
   if (store.name) renderHome();
   else renderWelcome();
 })();
